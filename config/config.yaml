@@ -9,4 +9,4 @@ data_ingestion:
 model_trainer:
   root_dir : artifacts/model_trainer
   train_data_path : artifacts/data_ingestion/LEVIR CD/train
-  
+  val_data_path : artifacts/data_ingestion/LEVIR CD/val

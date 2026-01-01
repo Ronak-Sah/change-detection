@@ -14,26 +14,28 @@ class DiceLoss(torch.nn.Module):
         self.smooth = smooth
 
     def forward(self, logits, targets):
-        probs = torch.softmax(logits, dim=1)
-        probs = probs[:,1,:,:]  # change class
+        probs = torch.softmax(logits, dim=1)[:, 1]  # (B,H,W)
         targets = targets.float()
 
-        intersection = (probs * targets).sum()
-        union = probs.sum() + targets.sum()
+        probs = probs.view(probs.size(0), -1)
+        targets = targets.view(targets.size(0), -1)
+
+        intersection = (probs * targets).sum(dim=1)
+        union = probs.sum(dim=1) + targets.sum(dim=1)
 
         dice = (2 * intersection + self.smooth) / (union + self.smooth)
-        return 1 - dice
+        return 1 - dice.mean()
 
 
 class ImageDataset(Dataset):
-    def __init__(self,path,patch_size=256,augmentation=True):
+    def __init__(self,path,patch_size=256,augmentation=True,limit=60):
         self.sub_a_path=os.path.join(path,"A")
         self.sub_b_path=os.path.join(path,"B")
         self.sub_label_path=os.path.join(path,"label")
         
-        self.a_path=os.listdir(self.sub_a_path)
-        self.b_path=os.listdir(self.sub_b_path)
-        self.label_path=os.listdir(self.sub_label_path)
+        self.a_path=os.listdir(self.sub_a_path)[:limit]
+        self.b_path=os.listdir(self.sub_b_path)[:limit]
+        self.label_path=os.listdir(self.sub_label_path)[:limit]
         self.patch_size=patch_size
         self.augmentation=augmentation
 
@@ -77,7 +79,6 @@ class ImageDataset(Dataset):
         return before_image,after_image,label_image
 
 
-
 class Model_Trainer:
     def __init__(self,config: ModelTrainerConfig):
         self.config= config
@@ -88,16 +89,27 @@ class Model_Trainer:
 
     def train(self):
         train_data_path=self.config.train_data_path
+        val_data_path=self.config.val_data_path
 
-        model_path = os.path.join(self.config.root_dir, "model.pth")
+        # model_path = os.path.join(self.config.root_dir, "model.pth")
         checkpoint_path = os.path.join(self.config.root_dir, "checkpoint.pth")
         best_model_path = os.path.join(self.config.root_dir, "best_model.pth")
 
-        dataset = ImageDataset(train_data_path)
-        dataloader = DataLoader(
-            dataset,
+        train_dataset = ImageDataset(train_data_path,limit=100)
+        val_dataset=ImageDataset(val_data_path)
+
+        train_dataloader = DataLoader(
+            train_dataset,
             batch_size=self.config.batch_size,  
             shuffle=True,
+            num_workers=8,
+            pin_memory=True,
+            persistent_workers=True
+        )
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=self.config.batch_size,  
+            shuffle=False,
             num_workers=8,
             pin_memory=True,
             persistent_workers=True
@@ -110,14 +122,14 @@ class Model_Trainer:
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=50,   
+            T_max=self.config.epochs,   
             eta_min=1e-6
         )
         
         best_loss=100.0
         start_epoch = 0
         if os.path.exists(checkpoint_path):
-            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
             self.model.load_state_dict(checkpoint["model_state"])
             optimizer.load_state_dict(checkpoint["optimizer_state"])
             scheduler.load_state_dict(checkpoint["scheduler_state"])
@@ -133,9 +145,11 @@ class Model_Trainer:
             print("Running epoch no... ",epoch+1)
             self.model.train()
             total_loss = 0.0
+            val_loss=0.0
             batch_no=0
-            for before_image,after_image,label_image in dataloader:
-                total_batches = len(dataloader)
+            print("Training batch...")
+            for before_image,after_image,label_image in train_dataloader:
+                total_batches = len(train_dataloader)
                 batch_no=batch_no+1
                 rem=int(total_batches) - batch_no
                 print(f"Batch no : {batch_no}, Total batch : {total_batches}, Remaining batch :{rem}" )
@@ -166,6 +180,32 @@ class Model_Trainer:
 
                 total_loss += loss.item()
 
+            print("Validation batch...")
+            with torch.no_grad():
+                self.model.eval()
+                batch_no=0
+                for before_image,after_image,label_image in val_dataloader:
+                    total_batches = len(val_dataloader)
+                    batch_no=batch_no+1
+                    rem=int(total_batches) - batch_no
+                    print(f"Batch no : {batch_no}, Total batch : {total_batches}, Remaining batch :{rem}" )
+                    
+                    before_image = before_image.to(self.device)
+                    after_image = after_image.to(self.device)
+                    label_image = label_image.to(self.device)
+
+                    if torch.isnan(before_image).any() or torch.isnan(after_image).any():
+                        print("Skipping batch: NaN detected in input frames")
+                        continue
+                    y_pred=self.model(before_image,after_image)
+
+                    loss = ce(y_pred, label_image) + dice(y_pred, label_image)
+
+                    val_loss += loss.item()
+
+
+
+
             torch.save({
                 "epoch": epoch,
                 "model_state": self.model.state_dict(),
@@ -173,10 +213,11 @@ class Model_Trainer:
                 "scheduler_state": scheduler.state_dict(),
                 "best_loss" : best_loss
             }, checkpoint_path)
-            print(f"Epoch {epoch+1}/{self.config.epochs+start_epoch}, Loss: {total_loss: .4f}")
-            avg_loss = total_loss / len(dataloader)
+            print(f"Epoch {epoch+1}/{self.config.epochs+start_epoch}, Loss: {total_loss: .4f}, Validation loss: {val_loss: .4f}")
+            avg_loss = total_loss / len(train_dataloader)
+            avg_val_loss = val_loss / len(val_dataloader)
             scheduler.step()
-            print(f"Epoch {epoch+1}/{self.config.epochs+start_epoch}, Avg Loss: {avg_loss:.4f}")
+            print(f"Epoch {epoch+1}/{self.config.epochs+start_epoch}, Avg Loss: {avg_loss:.4f}, Avg Loss: {avg_val_loss:.4f}")
 
             if avg_loss < best_loss:
                 best_loss = avg_loss
@@ -186,6 +227,7 @@ class Model_Trainer:
                 print(f"*** New best model saved! Avg Loss: {avg_loss:.4f} ***")
 
         
+        logger.info("Training Complete.")
 
 
     

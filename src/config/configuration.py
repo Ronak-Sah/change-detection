@@ -35,9 +35,10 @@ class ConfigurationManager:
         model_trainer_config = ModelTrainerConfig(
             root_dir=config.root_dir,
             train_data_path=config.train_data_path,
+            val_data_path=config.val_data_path,
             epochs= params.epochs,
-            no_of_channels= params.no_of_channels,
-            filters=params.filters
+            batch_size=params.batch_size
+            
             
         )
 
