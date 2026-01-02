@@ -95,8 +95,8 @@ class Model_Trainer:
         checkpoint_path = os.path.join(self.config.root_dir, "checkpoint.pth")
         best_model_path = os.path.join(self.config.root_dir, "best_model.pth")
 
-        train_dataset = ImageDataset(train_data_path,limit=100)
-        val_dataset=ImageDataset(val_data_path)
+        train_dataset = ImageDataset(train_data_path,limit=1000)
+        val_dataset=ImageDataset(val_data_path,limit=60)
 
         train_dataloader = DataLoader(
             train_dataset,
@@ -149,10 +149,10 @@ class Model_Trainer:
             batch_no=0
             print("Training batch...")
             for before_image,after_image,label_image in train_dataloader:
-                total_batches = len(train_dataloader)
-                batch_no=batch_no+1
-                rem=int(total_batches) - batch_no
-                print(f"Batch no : {batch_no}, Total batch : {total_batches}, Remaining batch :{rem}" )
+                # total_batches = len(train_dataloader)
+                # batch_no=batch_no+1
+                # rem=int(total_batches) - batch_no
+                # print(f"Batch no : {batch_no}, Total batch : {total_batches}, Remaining batch :{rem}" )
                 
                 before_image = before_image.to(self.device)
                 after_image = after_image.to(self.device)
@@ -185,10 +185,10 @@ class Model_Trainer:
                 self.model.eval()
                 batch_no=0
                 for before_image,after_image,label_image in val_dataloader:
-                    total_batches = len(val_dataloader)
-                    batch_no=batch_no+1
-                    rem=int(total_batches) - batch_no
-                    print(f"Batch no : {batch_no}, Total batch : {total_batches}, Remaining batch :{rem}" )
+                    # total_batches = len(val_dataloader)
+                    # batch_no=batch_no+1
+                    # rem=int(total_batches) - batch_no
+                    # print(f"Batch no : {batch_no}, Total batch : {total_batches}, Remaining batch :{rem}" )
                     
                     before_image = before_image.to(self.device)
                     after_image = after_image.to(self.device)

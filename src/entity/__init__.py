@@ -19,3 +19,10 @@ class ModelTrainerConfig:
   epochs: int
   batch_size: int
   
+
+@dataclass
+class ModelEvaluationConfig:
+  root_dir : Path
+  model_path : Path
+  test_data_path : Path
+  batch_size : int
